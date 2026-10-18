@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.smartattendance.app.data.repository.AttendanceRepository
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.launch // <-- Yeh import miss tha
 import java.time.LocalDate
 
 data class DashboardUiState(
