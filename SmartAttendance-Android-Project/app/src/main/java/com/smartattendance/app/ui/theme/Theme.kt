@@ -32,10 +32,9 @@ fun SmartAttendanceTheme(
         darkTheme -> DarkColorScheme
         else -> LightColorScheme
     }
-
     MaterialTheme(
         colorScheme = colorScheme,
-        typography = Typography,
+        typography = Typography(), // <-- Yahan bracket () miss tha
         content = content
     )
 }
