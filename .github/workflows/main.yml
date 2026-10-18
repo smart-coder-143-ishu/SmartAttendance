@@ -8,7 +8,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    # सीधे आपके फोल्डर के अंदर काम करने के लिए:
     defaults:
       run:
         working-directory: SmartAttendance-Android-Project
@@ -17,14 +16,13 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Fix Missing Resources & Gradle Setup
+      - name: Fix Missing Resources & Kotlin Errors
         run: |
-          # अगर गलती से 'scr' फोल्डर है तो उसे 'src' में बदलें
           if [ -d "app/scr" ]; then
             mv app/scr app/src
           fi
 
-          # Top-level build.gradle.kts को सही करें
+          # 1. Top-level build.gradle.kts fix
           cat << 'EOF' > build.gradle.kts
           plugins {
               id("com.android.application") version "8.2.2" apply false
@@ -33,31 +31,95 @@ jobs:
           }
           EOF
 
-          # अगर strings.xml या themes.xml नहीं हैं तो उन्हें बनाएं
+          # 2. Missing strings.xml and themes.xml fix
           mkdir -p app/src/main/res/values
-          if [ ! -f "app/src/main/res/values/strings.xml" ]; then
-            cat << 'EOF' > app/src/main/res/values/strings.xml
+          cat << 'EOF' > app/src/main/res/values/strings.xml
           <?xml version="1.0" encoding="utf-8"?>
           <resources>
               <string name="app_name">Smart Attendance</string>
           </resources>
           EOF
-          fi
 
-          if [ ! -f "app/src/main/res/values/themes.xml" ]; then
-            cat << 'EOF' > app/src/main/res/values/themes.xml
+          cat << 'EOF' > app/src/main/res/values/themes.xml
           <?xml version="1.0" encoding="utf-8"?>
           <resources>
               <style name="Theme.SmartAttendance" parent="android:Theme.Material.Light.NoActionBar" />
           </resources>
           EOF
-          fi
 
-          # AndroidManifest.xml में डिफ़ॉल्ट आइकन सेट करें ताकि aapt2 एरर न आए
+          # 3. AndroidManifest.xml icon fix
           if [ -f "app/src/main/AndroidManifest.xml" ]; then
             sed -i 's/@mipmap\/ic_launcher_round/@android:drawable\/sym_def_app_icon/g' app/src/main/AndroidManifest.xml
             sed -i 's/@mipmap\/ic_launcher/@android:drawable\/sym_def_app_icon/g' app/src/main/AndroidManifest.xml
           fi
+
+          # 4. Theme.kt missing colors & typography fix
+          THEME_FILE=$(find app/src -name "Theme.kt" | head -n 1)
+          if [ -n "$THEME_FILE" ]; then
+            cat << 'EOF' > "$THEME_FILE"
+          package com.smartattendance.app.ui.theme
+
+          import android.app.Activity
+          import android.os.Build
+          import androidx.compose.foundation.isSystemInDarkTheme
+          import androidx.compose.material3.*
+          import androidx.compose.runtime.Composable
+          import androidx.compose.runtime.SideEffect
+          import androidx.compose.ui.graphics.Color
+          import androidx.compose.ui.graphics.toArgb
+          import androidx.compose.ui.platform.LocalContext
+          import androidx.compose.ui.platform.LocalView
+          import androidx.core.view.WindowCompat
+
+          private val DarkColorScheme = darkColorScheme(
+              primary = Color(0xFFD0BCFF),
+              secondary = Color(0xFFCCC2DC),
+              tertiary = Color(0xFFEFB8C8)
+          )
+
+          private val LightColorScheme = lightColorScheme(
+              primary = Color(0xFF6650a4),
+              secondary = Color(0xFF625b71),
+              tertiary = Color(0xFF7D5260)
+          )
+
+          @Composable
+          fun SmartAttendanceTheme(
+              darkTheme: Boolean = isSystemInDarkTheme(),
+              dynamicColor: Boolean = true,
+              content: @Composable () -> Unit
+          ) {
+              val colorScheme = when {
+                  dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+                      val context = LocalContext.current
+                      if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+                  }
+                  darkTheme -> DarkColorScheme
+                  else -> LightColorScheme
+              }
+              val view = LocalView.current
+              if (!view.isInEditMode) {
+                  SideEffect {
+                      val window = (view.context as Activity).window
+                      window.statusBarColor = colorScheme.primary.toArgb()
+                      WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = darkTheme
+                  }
+              }
+              MaterialTheme(
+                  colorScheme = colorScheme,
+                  typography = Typography(),
+                  content = content
+              )
+          }
+          EOF
+          fi
+
+          # 5. DashboardViewModel.kt missing coroutine launch import fix
+          for ktfile in $(find app/src -name "*ViewModel.kt"); do
+            if ! grep -q "import kotlinx.coroutines.launch" "$ktfile"; then
+              sed -i '1s/^/import kotlinx.coroutines.launch\n/' "$ktfile"
+            fi
+          done
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -71,7 +133,7 @@ jobs:
           gradle-version: '8.5'
 
       - name: Build Debug APK
-        run: gradle assembleDebug --stacktrace
+        run: gradle assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
