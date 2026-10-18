@@ -16,13 +16,22 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Fix Missing Resources & Kotlin Errors
+      - name: Fix Missing Files & AndroidX Config
         run: |
           if [ -d "app/scr" ]; then
             mv app/scr app/src
           fi
 
-          # 1. Top-level build.gradle.kts fix
+          # 1. Missing gradle.properties file banayein (AndroidX enable karne ke liye)
+          cat << 'EOF' > gradle.properties
+          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          android.useAndroidX=true
+          android.enableJetifier=true
+          kotlin.code.style=official
+          android.nonTransitiveRClass=true
+          EOF
+
+          # 2. Top-level build.gradle.kts fix
           cat << 'EOF' > build.gradle.kts
           plugins {
               id("com.android.application") version "8.2.2" apply false
@@ -31,7 +40,7 @@ jobs:
           }
           EOF
 
-          # 2. Missing strings.xml and themes.xml fix
+          # 3. Missing strings.xml and themes.xml fix
           mkdir -p app/src/main/res/values
           cat << 'EOF' > app/src/main/res/values/strings.xml
           <?xml version="1.0" encoding="utf-8"?>
@@ -47,13 +56,13 @@ jobs:
           </resources>
           EOF
 
-          # 3. AndroidManifest.xml icon fix
+          # 4. AndroidManifest.xml icon fix
           if [ -f "app/src/main/AndroidManifest.xml" ]; then
             sed -i 's/@mipmap\/ic_launcher_round/@android:drawable\/sym_def_app_icon/g' app/src/main/AndroidManifest.xml
             sed -i 's/@mipmap\/ic_launcher/@android:drawable\/sym_def_app_icon/g' app/src/main/AndroidManifest.xml
           fi
 
-          # 4. Theme.kt missing colors & typography fix
+          # 5. Theme.kt missing colors & typography fix
           THEME_FILE=$(find app/src -name "Theme.kt" | head -n 1)
           if [ -n "$THEME_FILE" ]; then
             cat << 'EOF' > "$THEME_FILE"
@@ -114,10 +123,10 @@ jobs:
           EOF
           fi
 
-          # 5. DashboardViewModel.kt missing coroutine launch import fix
+          # 6. ViewModel missing coroutine launch import fix (properly after package line)
           for ktfile in $(find app/src -name "*ViewModel.kt"); do
             if ! grep -q "import kotlinx.coroutines.launch" "$ktfile"; then
-              sed -i '1s/^/import kotlinx.coroutines.launch\n/' "$ktfile"
+              sed -i '/^package /a import kotlinx.coroutines.launch' "$ktfile"
             fi
           done
 
