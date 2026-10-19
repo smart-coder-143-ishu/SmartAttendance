@@ -311,15 +311,16 @@ fun StudentsTab(students: List<Student>, onAdd: (String, String, String) -> Unit
             var roll by remember { mutableStateOf("") }
             var cls by remember { mutableStateOf("") }
             
+        
             AlertDialog(
                 onDismissRequest = { showDialog = false },
                 containerColor = Slate900,
                 title = { Text("Add New Student", color = Color.White) },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Name", color = TextGray) }, colors = TextFieldDefaults.outlinedTextFieldColors(textColor = Color.White))
-                        OutlinedTextField(value = roll, onValueChange = { roll = it }, label = { Text("Roll Number", color = TextGray) }, colors = TextFieldDefaults.outlinedTextFieldColors(textColor = Color.White))
-                        OutlinedTextField(value = cls, onValueChange = { cls = it }, label = { Text("Class", color = TextGray) }, colors = TextFieldDefaults.outlinedTextFieldColors(textColor = Color.White))
+                        OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Name", color = TextGray) }, colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White))
+                        OutlinedTextField(value = roll, onValueChange = { roll = it }, label = { Text("Roll Number", color = TextGray) }, colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White))
+                        OutlinedTextField(value = cls, onValueChange = { cls = it }, label = { Text("Class", color = TextGray) }, colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White))
                     }
                 },
                 confirmButton = {
