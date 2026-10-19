@@ -8,6 +8,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -20,7 +21,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
@@ -136,6 +136,35 @@ fun PremiumMainScreen(repository: AttendanceRepository, viewModel: DashboardView
     }
 }
 
+// ---------------- REUSABLE CLASS SELECTOR ----------------
+@Composable
+fun ClassSelector(classes: List<String>, selectedClass: String, onClassSelected: (String) -> Unit) {
+    if (classes.size > 1) { // Only show if there's actual data to filter
+        LazyRow(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            items(classes) { cls ->
+                val isSelected = cls == selectedClass
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(if (isSelected) Indigo600 else Slate800)
+                        .clickable { onClassSelected(cls) }
+                        .padding(horizontal = 16.dp, vertical = 10.dp)
+                ) {
+                    Text(
+                        text = cls,
+                        color = if (isSelected) TextWhite else TextGray,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+        }
+    }
+}
+
 // ---------------- 1. DASHBOARD TAB ----------------
 @Composable
 fun DashboardTab(state: com.smartattendance.app.ui.viewmodel.DashboardUiState, totalStudents: Int, onNavigate: (Int) -> Unit) {
@@ -210,9 +239,18 @@ fun StatBox(title: String, count: Int, color: Color, modifier: Modifier) {
     }
 }
 
-// ---------------- 2. DAILY ATTENDANCE TAB ----------------
+// ---------------- 2. DAILY ATTENDANCE TAB (Class-wise) ----------------
 @Composable
 fun DailyAttendanceTab(students: List<Student>, records: List<AttendanceRecord>, selectedDate: String, onSave: (Map<Long, Boolean>) -> Unit) {
+    val classList = remember(students) { listOf("All") + students.map { it.className }.distinct().sorted() }
+    var selectedClass by remember { mutableStateOf("All") }
+    
+    LaunchedEffect(classList) {
+        if (selectedClass !in classList) selectedClass = "All"
+    }
+
+    val displayStudents = if (selectedClass == "All") students else students.filter { it.className == selectedClass }
+
     var attendanceMap by remember(students, records) {
         val map = mutableMapOf<Long, Boolean>()
         students.forEach { s -> map[s.id] = records.find { it.studentId == s.id }?.isPresent ?: true }
@@ -220,23 +258,32 @@ fun DailyAttendanceTab(students: List<Student>, records: List<AttendanceRecord>,
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        Column(modifier = Modifier.padding(16.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Column(modifier = Modifier.padding(top = 16.dp, start = 16.dp, end = 16.dp, bottom = 8.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text("Daily Attendance", color = TextWhite, fontSize = 24.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp)
-                TextButton(onClick = { attendanceMap = students.associate { it.id to true }.toMutableMap() }) {
+                TextButton(onClick = { 
+                    // Sirf selected class ke baccho ko present mark karega
+                    attendanceMap = attendanceMap.toMutableMap().apply {
+                        displayStudents.forEach { this[it.id] = true }
+                    }
+                }) {
                     Text("Mark All Present", color = Emerald500, fontWeight = FontWeight.SemiBold)
                 }
             }
             Card(colors = CardDefaults.cardColors(containerColor = Slate900), shape = RoundedCornerShape(12.dp)) {
                 Row(modifier = Modifier.padding(16.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("Date: $selectedDate", color = Indigo600, fontWeight = FontWeight.SemiBold)
-                    Text("Present: ${attendanceMap.values.count { it }} / ${students.size}", color = Emerald500, fontWeight = FontWeight.SemiBold)
+                    val displayedPresent = displayStudents.count { attendanceMap[it.id] == true }
+                    Text("Present: $displayedPresent / ${displayStudents.size}", color = Emerald500, fontWeight = FontWeight.SemiBold)
                 }
             }
         }
 
+        // Horizontal Scrollable Class Filter
+        ClassSelector(classes = classList, selectedClass = selectedClass, onClassSelected = { selectedClass = it })
+
         LazyColumn(modifier = Modifier.weight(1f).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            items(students) { student ->
+            items(displayStudents, key = { it.id }) { student ->
                 val isPresent = attendanceMap[student.id] ?: true
                 Card(colors = CardDefaults.cardColors(containerColor = Slate900), shape = RoundedCornerShape(16.dp)) {
                     Row(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
@@ -276,7 +323,7 @@ fun DailyAttendanceTab(students: List<Student>, records: List<AttendanceRecord>,
     }
 }
 
-// ---------------- 3. STUDENTS TAB (With App Crash Fix & Validation) ----------------
+// ---------------- 3. STUDENTS TAB (Class-wise & Search) ----------------
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun StudentsTab(
@@ -290,8 +337,16 @@ fun StudentsTab(
     var searchQuery by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
 
+    val classList = remember(students) { listOf("All") + students.map { it.className }.distinct().sorted() }
+    var selectedClass by remember { mutableStateOf("All") }
+
+    LaunchedEffect(classList) {
+        if (selectedClass !in classList) selectedClass = "All"
+    }
+
     val filteredStudents = students.filter {
-        it.name.contains(searchQuery, ignoreCase = true) || it.rollNumber.contains(searchQuery, ignoreCase = true)
+        (selectedClass == "All" || it.className == selectedClass) &&
+        (it.name.contains(searchQuery, ignoreCase = true) || it.rollNumber.contains(searchQuery, ignoreCase = true))
     }
 
     Scaffold(
@@ -302,36 +357,35 @@ fun StudentsTab(
             }
         }
     ) { padding ->
-        Column(modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
-            Text("Student Directory", color = TextWhite, fontSize = 24.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp)
-            Spacer(modifier = Modifier.height(16.dp))
+        Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+            Column(modifier = Modifier.padding(top = 16.dp, start = 16.dp, end = 16.dp)) {
+                Text("Student Directory", color = TextWhite, fontSize = 24.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp)
+                Spacer(modifier = Modifier.height(16.dp))
 
-            // Premium Search Bar
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
-                modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("Search by name or roll no...", color = TextGray, fontSize = 14.sp) },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search", tint = TextGray) },
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedTextColor = TextWhite,
-                    unfocusedTextColor = TextWhite,
-                    focusedBorderColor = Indigo600,
-                    unfocusedBorderColor = Slate800,
-                    focusedContainerColor = Slate900,
-                    unfocusedContainerColor = Slate900
-                ),
-                singleLine = true,
-                shape = RoundedCornerShape(12.dp)
-            )
-            Spacer(modifier = Modifier.height(16.dp))
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("Search by name or roll no...", color = TextGray, fontSize = 14.sp) },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search", tint = TextGray) },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = TextWhite, unfocusedTextColor = TextWhite,
+                        focusedBorderColor = Indigo600, unfocusedBorderColor = Slate800,
+                        focusedContainerColor = Slate900, unfocusedContainerColor = Slate900
+                    ),
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp)
+                )
+            }
+
+            ClassSelector(classes = classList, selectedClass = selectedClass, onClassSelected = { selectedClass = it })
 
             if (filteredStudents.isEmpty()) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(if (searchQuery.isNotEmpty()) "No students found." else "No Students Added Yet", color = TextGray, fontSize = 14.sp)
+                Box(modifier = Modifier.fillMaxSize().padding(16.dp), contentAlignment = Alignment.Center) {
+                    Text(if (searchQuery.isNotEmpty()) "No students found." else "No Students in this Class", color = TextGray, fontSize = 14.sp)
                 }
             } else {
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(horizontal = 16.dp)) {
                     items(filteredStudents) { student ->
                         Card(colors = CardDefaults.cardColors(containerColor = Slate800), shape = RoundedCornerShape(14.dp)) {
                             Row(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -359,7 +413,6 @@ fun StudentsTab(
             }
         }
 
-        // Add / Edit Dialog with 100% Crash Fix & Validation
         if (showDialog) {
             var name by remember { mutableStateOf(editingStudent?.name ?: "") }
             var roll by remember { mutableStateOf(editingStudent?.rollNumber ?: "") }
@@ -380,79 +433,71 @@ fun StudentsTab(
                             }
                         }
                         OutlinedTextField(
-                            value = name, 
-                            onValueChange = { name = it; errorMessage = "" }, 
-                            label = { Text("Full Name", color = TextGray) }, 
+                            value = name, onValueChange = { name = it; errorMessage = "" }, label = { Text("Full Name", color = TextGray) }, 
                             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words),
                             colors = OutlinedTextFieldDefaults.colors(focusedTextColor = TextWhite, unfocusedTextColor = TextWhite, focusedContainerColor = Slate950, unfocusedContainerColor = Slate950),
-                            singleLine = true,
-                            shape = RoundedCornerShape(10.dp)
+                            singleLine = true, shape = RoundedCornerShape(10.dp)
                         )
                         OutlinedTextField(
-                            value = roll, 
-                            onValueChange = { roll = it; errorMessage = "" }, 
-                            label = { Text("Roll Number", color = TextGray) }, 
+                            value = roll, onValueChange = { roll = it; errorMessage = "" }, label = { Text("Roll Number", color = TextGray) }, 
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             colors = OutlinedTextFieldDefaults.colors(focusedTextColor = TextWhite, unfocusedTextColor = TextWhite, focusedContainerColor = Slate950, unfocusedContainerColor = Slate950),
-                            singleLine = true,
-                            shape = RoundedCornerShape(10.dp)
+                            singleLine = true, shape = RoundedCornerShape(10.dp)
                         )
                         OutlinedTextField(
-                            value = cls, 
-                            onValueChange = { cls = it; errorMessage = "" }, 
-                            label = { Text("Class / Grade", color = TextGray) }, 
+                            value = cls, onValueChange = { cls = it; errorMessage = "" }, label = { Text("Class / Grade", color = TextGray) }, 
                             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words),
                             colors = OutlinedTextFieldDefaults.colors(focusedTextColor = TextWhite, unfocusedTextColor = TextWhite, focusedContainerColor = Slate950, unfocusedContainerColor = Slate950),
-                            singleLine = true,
-                            shape = RoundedCornerShape(10.dp)
+                            singleLine = true, shape = RoundedCornerShape(10.dp)
                         )
                     }
                 },
                 confirmButton = {
                     Button(
                         onClick = { 
-                            if (name.isBlank() || roll.isBlank() || cls.isBlank()) {
-                                errorMessage = "All fields are required!"
-                            } else {
+                            if (name.isBlank() || roll.isBlank() || cls.isBlank()) errorMessage = "All fields are required!"
+                            else {
                                 scope.launch {
                                     try {
-                                        if (editingStudent != null) {
-                                            onUpdate(editingStudent!!.copy(name = name.trim(), rollNumber = roll.trim(), className = cls.trim()))
-                                        } else {
-                                            onAdd(name.trim(), roll.trim(), cls.trim())
-                                        }
+                                        if (editingStudent != null) onUpdate(editingStudent!!.copy(name = name.trim(), rollNumber = roll.trim(), className = cls.trim()))
+                                        else onAdd(name.trim(), roll.trim(), cls.trim())
                                         showDialog = false
-                                    } catch (e: Exception) {
-                                        // CRASH FIX: Handles SQLite duplicate index exception
-                                        errorMessage = "This Roll Number already exists in this class!"
-                                    }
+                                    } catch (e: Exception) { errorMessage = "This Roll Number already exists in this class!" }
                                 }
                             }
                         }, 
-                        colors = ButtonDefaults.buttonColors(containerColor = Indigo600),
-                        shape = RoundedCornerShape(8.dp)
+                        colors = ButtonDefaults.buttonColors(containerColor = Indigo600), shape = RoundedCornerShape(8.dp)
                     ) { Text("Save", fontWeight = FontWeight.SemiBold) }
                 },
-                dismissButton = {
-                    TextButton(onClick = { showDialog = false; errorMessage = "" }) { Text("Cancel", color = TextGray, fontWeight = FontWeight.Medium) }
-                }
+                dismissButton = { TextButton(onClick = { showDialog = false; errorMessage = "" }) { Text("Cancel", color = TextGray, fontWeight = FontWeight.Medium) } }
             )
         }
     }
 }
 
-// ---------------- 4. STATS TAB ----------------
+// ---------------- 4. STATS TAB (Class-wise) ----------------
 @Composable
 fun StatsTab(students: List<Student>, dashState: com.smartattendance.app.ui.viewmodel.DashboardUiState) {
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Text("Attendance Stats", color = TextWhite, fontSize = 24.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp)
-        
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            DashboardCard(title = "Total Recorded Days", value = dashState.totalRecordedDays.toString(), icon = Icons.Default.CalendarMonth, color = Indigo600, modifier = Modifier.weight(1f))
+    val classList = remember(students) { listOf("All") + students.map { it.className }.distinct().sorted() }
+    var selectedClass by remember { mutableStateOf("All") }
+
+    LaunchedEffect(classList) {
+        if (selectedClass !in classList) selectedClass = "All"
+    }
+
+    val displayStudents = if (selectedClass == "All") students else students.filter { it.className == selectedClass }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        Column(modifier = Modifier.padding(top = 16.dp, start = 16.dp, end = 16.dp)) {
+            Text("Attendance Stats", color = TextWhite, fontSize = 24.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp)
+            Spacer(modifier = Modifier.height(16.dp))
+            DashboardCard(title = "Total Recorded Days", value = dashState.totalRecordedDays.toString(), icon = Icons.Default.CalendarMonth, color = Indigo600, modifier = Modifier.fillMaxWidth())
         }
 
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            items(students) { student ->
+        ClassSelector(classes = classList, selectedClass = selectedClass, onClassSelected = { selectedClass = it })
+
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(horizontal = 16.dp)) {
+            items(displayStudents) { student ->
                 val percentage = dashState.todayPercentage 
                 val isGood = percentage >= 75
                 
@@ -474,6 +519,7 @@ fun StatsTab(students: List<Student>, dashState: com.smartattendance.app.ui.view
                     }
                 }
             }
+            item { Spacer(modifier = Modifier.height(16.dp)) }
         }
     }
 }
