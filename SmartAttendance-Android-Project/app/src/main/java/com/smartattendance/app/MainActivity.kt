@@ -4,13 +4,13 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -21,6 +21,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.smartattendance.app.data.model.AttendanceRecord
@@ -123,6 +124,7 @@ fun PremiumMainScreen(repository: AttendanceRepository, viewModel: DashboardView
                 2 -> StudentsTab(
                     students = students,
                     onAdd = { name, roll, cls -> scope.launch { repository.insertStudent(name, roll, cls) } },
+                    onUpdate = { student -> scope.launch { repository.updateStudent(student) } },
                     onDelete = { student -> scope.launch { repository.deleteStudent(student) } }
                 )
                 3 -> StatsTab(students = students, dashState = dashState)
@@ -131,7 +133,7 @@ fun PremiumMainScreen(repository: AttendanceRepository, viewModel: DashboardView
     }
 }
 
-// ---------------- 1. DASHBOARD TAB (Web UI Replica) ----------------
+// ---------------- 1. DASHBOARD TAB ----------------
 @Composable
 fun DashboardTab(state: com.smartattendance.app.ui.viewmodel.DashboardUiState, totalStudents: Int, onNavigate: (Int) -> Unit) {
     Column(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -265,39 +267,70 @@ fun DailyAttendanceTab(students: List<Student>, records: List<AttendanceRecord>,
     }
 }
 
-// ---------------- 3. STUDENTS TAB ----------------
+// ---------------- 3. STUDENTS TAB (With Search, Edit & Validation) ----------------
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun StudentsTab(students: List<Student>, onAdd: (String, String, String) -> Unit, onDelete: (Student) -> Unit) {
+fun StudentsTab(students: List<Student>, onAdd: (String, String, String) -> Unit, onUpdate: (Student) -> Unit, onDelete: (Student) -> Unit) {
     var showDialog by remember { mutableStateOf(false) }
+    var editingStudent by remember { mutableStateOf<Student?>(null) }
+    var searchQuery by remember { mutableStateOf("") }
+
+    val filteredStudents = students.filter {
+        it.name.contains(searchQuery, ignoreCase = true) || it.rollNumber.contains(searchQuery, ignoreCase = true)
+    }
 
     Scaffold(
         containerColor = Slate950,
         floatingActionButton = {
-            FloatingActionButton(onClick = { showDialog = true }, containerColor = Indigo600, contentColor = Color.White) {
+            FloatingActionButton(onClick = { editingStudent = null; showDialog = true }, containerColor = Indigo600, contentColor = Color.White) {
                 Icon(Icons.Default.Add, contentDescription = "Add")
             }
         }
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
             Text("Student Directory", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Search Bar
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("Search by name or roll no...", color = TextGray) },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search", tint = TextGray) },
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White,
+                    focusedBorderColor = Indigo600,
+                    unfocusedBorderColor = Slate800,
+                    focusedContainerColor = Slate900,
+                    unfocusedContainerColor = Slate900
+                ),
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp)
+            )
             Spacer(modifier = Modifier.height(16.dp))
 
-            if (students.isEmpty()) {
+            if (filteredStudents.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("No Students Added Yet", color = TextGray)
+                    Text(if (searchQuery.isNotEmpty()) "No students found." else "No Students Added Yet", color = TextGray)
                 }
             } else {
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(students) { student ->
+                    items(filteredStudents) { student ->
                         Card(colors = CardDefaults.cardColors(containerColor = Slate800), shape = RoundedCornerShape(12.dp)) {
                             Row(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                                 Column {
                                     Text(student.name, color = Color.White, fontWeight = FontWeight.Bold)
                                     Text("Roll: ${student.rollNumber} • Class: ${student.className}", color = TextGray, fontSize = 12.sp)
                                 }
-                                IconButton(onClick = { onDelete(student) }) {
-                                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Rose500)
+                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    IconButton(onClick = { editingStudent = student; showDialog = true }) {
+                                        Icon(Icons.Default.Edit, contentDescription = "Edit", tint = Emerald500)
+                                    }
+                                    IconButton(onClick = { onDelete(student) }) {
+                                        Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Rose500)
+                                    }
                                 }
                             }
                         }
@@ -306,28 +339,65 @@ fun StudentsTab(students: List<Student>, onAdd: (String, String, String) -> Unit
             }
         }
 
+        // Add / Edit Dialog with Form Validation
         if (showDialog) {
-            var name by remember { mutableStateOf("") }
-            var roll by remember { mutableStateOf("") }
-            var cls by remember { mutableStateOf("") }
+            var name by remember { mutableStateOf(editingStudent?.name ?: "") }
+            var roll by remember { mutableStateOf(editingStudent?.rollNumber ?: "") }
+            var cls by remember { mutableStateOf(editingStudent?.className ?: "") }
+            var errorMessage by remember { mutableStateOf("") }
             
-        
             AlertDialog(
-                onDismissRequest = { showDialog = false },
+                onDismissRequest = { showDialog = false; errorMessage = "" },
                 containerColor = Slate900,
-                title = { Text("Add New Student", color = Color.White) },
+                title = { Text(if (editingStudent == null) "Add New Student" else "Edit Student", color = Color.White, fontWeight = FontWeight.Bold) },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Name", color = TextGray) }, colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White))
-                        OutlinedTextField(value = roll, onValueChange = { roll = it }, label = { Text("Roll Number", color = TextGray) }, colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White))
-                        OutlinedTextField(value = cls, onValueChange = { cls = it }, label = { Text("Class", color = TextGray) }, colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White))
+                        if (errorMessage.isNotEmpty()) {
+                            Text(errorMessage, color = Rose500, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                        }
+                        OutlinedTextField(
+                            value = name, 
+                            onValueChange = { name = it; errorMessage = "" }, 
+                            label = { Text("Full Name", color = TextGray) }, 
+                            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
+                            singleLine = true
+                        )
+                        OutlinedTextField(
+                            value = roll, 
+                            onValueChange = { roll = it; errorMessage = "" }, 
+                            label = { Text("Roll Number", color = TextGray) }, 
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
+                            singleLine = true
+                        )
+                        OutlinedTextField(
+                            value = cls, 
+                            onValueChange = { cls = it; errorMessage = "" }, 
+                            label = { Text("Class / Grade", color = TextGray) }, 
+                            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
+                            singleLine = true
+                        )
                     }
                 },
                 confirmButton = {
-                    Button(onClick = { if (name.isNotBlank()) { onAdd(name, roll, cls); showDialog = false } }, colors = ButtonDefaults.buttonColors(containerColor = Indigo600)) { Text("Save") }
+                    Button(
+                        onClick = { 
+                            if (name.isBlank() || roll.isBlank() || cls.isBlank()) {
+                                errorMessage = "All fields are required!"
+                            } else {
+                                if (editingStudent != null) {
+                                    onUpdate(editingStudent!!.copy(name = name.trim(), rollNumber = roll.trim(), className = cls.trim()))
+                                } else {
+                                    onAdd(name.trim(), roll.trim(), cls.trim())
+                                }
+                                showDialog = false
+                            }
+                        }, 
+                        colors = ButtonDefaults.buttonColors(containerColor = Indigo600)
+                    ) { Text("Save") }
                 },
                 dismissButton = {
-                    TextButton(onClick = { showDialog = false }) { Text("Cancel", color = TextGray) }
+                    TextButton(onClick = { showDialog = false; errorMessage = "" }) { Text("Cancel", color = TextGray) }
                 }
             )
         }
@@ -346,8 +416,7 @@ fun StatsTab(students: List<Student>, dashState: com.smartattendance.app.ui.view
 
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(students) { student ->
-                // Basic demo calculation since original stats logic is missing in standard AI Studio DAO
-                val percentage = dashState.todayPercentage // Placeholder for visual effect
+                val percentage = dashState.todayPercentage 
                 
                 Card(colors = CardDefaults.cardColors(containerColor = Slate800), shape = RoundedCornerShape(12.dp)) {
                     Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
